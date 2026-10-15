@@ -27,7 +27,9 @@ PostgreSQL 17 + Prisma 7 (`prisma-client` generator → `src/generated/prisma`, 
 adapter, config in `prisma.config.ts`) · Better Auth 1.7 (email/password, phone OTP,
 Google, TOTP 2FA) · Redis 7 + BullMQ 6 · Zod 4 · Luxon · pino · Vitest 5 · Playwright.
 
-Versions are pinned exactly (`.npmrc` has `save-exact`). TypeScript stays on 6.x because
+Versions are pinned exactly (`.npmrc` has `save-exact`). `pnpm.overrides` in package.json
+pins patched `deepmerge-ts` and `mysql2` (pulled in by the Prisma CLI; flagged by
+`pnpm audit`). Drop them once a Prisma release ships the fixed versions. TypeScript stays on 6.x because
 typescript-eslint doesn't support TS 7 yet. ESLint stays on 9 for eslint-config-next plugins.
 
 ## Commands
