@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: clinic
+          POSTGRES_PASSWORD: clinic
+          POSTGRES_DB: clinic
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U clinic -d clinic"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://clinic:clinic@localhost:5432/clinic
+      TEST_DATABASE_URL: postgresql://clinic:clinic@localhost:5432/clinic_test
+      REDIS_URL: redis://localhost:6379
+      BETTER_AUTH_SECRET: ci-only-secret-0123456789abcdefghijklmnopqrstuvwxyz
+      FIELD_ENCRYPTION_KEYS: v1:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+      EMAIL_PROVIDER: console
+      SMS_PROVIDER: console
+      APP_URL: http://localhost:3000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Create test database
+        run: |
+          PGPASSWORD=clinic psql -h localhost -U clinic -d clinic -c "CREATE DATABASE clinic_test;"
+          PGPASSWORD=clinic psql -h localhost -U clinic -d clinic -c "CREATE EXTENSION IF NOT EXISTS btree_gist;"
+          PGPASSWORD=clinic psql -h localhost -U clinic -d clinic_test -c "CREATE EXTENSION IF NOT EXISTS btree_gist;"
+
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm format:check
+      - run: pnpm test
+      - run: pnpm test:integration
+
+      - name: Migrate and seed
+        run: pnpm db:deploy && pnpm db:seed
+
+      - name: Install Playwright browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Build
+        run: pnpm build
+        env:
+          NODE_ENV: production
+          BETTER_AUTH_SECRET: ci-only-production-build-secret-0123456789abcdef
+          FIELD_ENCRYPTION_KEYS: v1:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+
+      - run: pnpm test:e2e
+        env:
+          E2E_USE_BUILD: "1"
+          ENABLE_DEV_OUTBOX: "true"
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Dependency vulnerability scan
+        run: pnpm audit --prod --audit-level high

@@ -1,0 +1,208 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Design tokens.
+ * Palette: ink on cool paper, bottle-green clinic brand (overridable per clinic via
+ * --brand on the clinic layout), haldi (turmeric) reserved for "now serving"/attention.
+ * Type: Atkinson Hyperlegible Next (Latin, chosen for low-vision legibility) and
+ * Noto Nastaliq Urdu. Times and tokens always use tabular figures.
+ */
+:root {
+  --brand: #0e5a43;
+  --brand-foreground: #ffffff;
+
+  --ink: #17242f;
+  --paper: #f6f7f4;
+  --haldi: #d9971a;
+  --haldi-soft: #fbefd5;
+  --line: #d9dfd8;
+
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: #ffffff;
+  --card-foreground: var(--ink);
+  --popover: #ffffff;
+  --popover-foreground: var(--ink);
+  --primary: var(--brand);
+  --primary-foreground: var(--brand-foreground);
+  --secondary: #e8ece6;
+  --secondary-foreground: var(--ink);
+  --muted: #eceee9;
+  --muted-foreground: #56636c;
+  --accent: #e4ede8;
+  --accent-foreground: var(--ink);
+  --destructive: #b42318;
+  --destructive-foreground: #ffffff;
+  --border: var(--line);
+  --input: #c9d1c8;
+  --ring: var(--brand);
+  --radius: 0.5rem;
+
+  /* Latin glyphs come from Atkinson; Arabic-script glyphs fall through to Nastaliq
+     (Atkinson's @font-face only covers the Latin unicode range). */
+  --font-latin: var(--font-atkinson), ui-sans-serif, system-ui, sans-serif;
+  --font-urdu:
+    var(--font-atkinson), var(--font-nastaliq), "Jameel Noori Nastaleeq", system-ui, sans-serif;
+}
+
+.dark {
+  --ink: #e7ece8;
+  --paper: #10181e;
+  --line: #2a3640;
+  --haldi-soft: #3a2d10;
+
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: #16212a;
+  --card-foreground: var(--ink);
+  --popover: #16212a;
+  --popover-foreground: var(--ink);
+  --primary: color-mix(in oklab, var(--brand) 70%, white);
+  --primary-foreground: #08130f;
+  --secondary: #1e2b34;
+  --secondary-foreground: var(--ink);
+  --muted: #1b2730;
+  --muted-foreground: #9aa8a6;
+  --accent: #1d2d2a;
+  --accent-foreground: var(--ink);
+  --destructive: #f97066;
+  --destructive-foreground: #1b0a08;
+  --border: var(--line);
+  --input: #34424c;
+  --ring: color-mix(in oklab, var(--brand) 70%, white);
+}
+
+/*
+ * Custom properties resolve where they're declared, so a clinic layout that sets --brand
+ * must re-derive the brand-dependent tokens in its own scope.
+ */
+.brand-scope {
+  --primary: var(--brand);
+  --ring: var(--brand);
+}
+.dark .brand-scope {
+  --primary: color-mix(in oklab, var(--brand) 70%, white);
+  --ring: color-mix(in oklab, var(--brand) 70%, white);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-haldi: var(--haldi);
+  --color-haldi-soft: var(--haldi-soft);
+  --color-ink: var(--ink);
+
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 4px);
+  --radius-xl: calc(var(--radius) + 8px);
+
+  --font-sans: var(--font-latin);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-latin);
+    font-size: 1rem;
+    line-height: 1.55;
+  }
+  /* Nastaliq is tall; give it room so diacritics don't collide between lines. */
+  html[lang="ur"] body {
+    font-family: var(--font-urdu);
+    line-height: 2.1;
+  }
+  html[lang="ur"] :is(h1, h2, h3) {
+    line-height: 1.9;
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+    letter-spacing: -0.01em;
+  }
+  p {
+    text-wrap: pretty;
+  }
+  :focus-visible {
+    outline: 3px solid var(--ring);
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  /* Times, prices, token numbers: figures line up in columns. */
+  .figures {
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+
+  /*
+   * The token slip: the one bold element of the system. Mirrors the printed queue
+   * slips handed out at Pakistani reception desks: a heavy numeral in a framed slip
+   * with a torn (perforated) edge.
+   */
+  .token-slip {
+    position: relative;
+    display: inline-grid;
+    place-items: center;
+    min-width: 7.5rem;
+    padding: 1rem 1.25rem 1.25rem;
+    background: var(--card);
+    border: 2px solid var(--ink);
+    border-radius: 0.25rem;
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+  .token-slip::after {
+    content: "";
+    position: absolute;
+    inset-inline: -2px;
+    bottom: -7px;
+    height: 7px;
+    background: radial-gradient(circle at 5px 0, transparent 4px, var(--ink) 4.5px) 0 0 / 10px 7px
+      repeat-x;
+  }
+  .token-slip[data-state="serving"] {
+    background: var(--haldi-soft);
+    border-color: var(--haldi);
+  }
+  .token-number {
+    font-size: clamp(3rem, 9vw, 5.5rem);
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -0.03em;
+  }
+}

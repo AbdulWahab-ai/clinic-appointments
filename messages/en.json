@@ -1,0 +1,89 @@
+{
+  "common": {
+    "appName": "Clinic Appointments",
+    "language": "Language",
+    "switchToUrdu": "اردو",
+    "switchToEnglish": "English",
+    "signIn": "Sign in",
+    "signOut": "Sign out",
+    "skipToContent": "Skip to main content",
+    "loading": "Loading…",
+    "backHome": "Back to home"
+  },
+  "home": {
+    "title": "Book a doctor without the waiting-room guesswork",
+    "lede": "Clinics on this platform publish their real schedules. Pick a time, get your token, and see when you'll be called.",
+    "tokenLabel": "Your token",
+    "tokenStatus": "About 25 minutes. 4 people ahead of you.",
+    "forClinics": "Run a clinic?",
+    "forClinicsBody": "Staff sign in to manage schedules, the daily queue and walk-ins.",
+    "staffSignIn": "Staff sign in",
+    "findClinic": "Open a clinic's booking page",
+    "demoClinic": "Shifa Family Clinic (demo)"
+  },
+  "auth": {
+    "signInTitle": "Sign in",
+    "signInLede": "Use the email and password your clinic set up, or a code sent to your phone.",
+    "tabEmail": "Email",
+    "tabPhone": "Phone",
+    "email": "Email",
+    "password": "Password",
+    "phone": "Mobile number",
+    "phoneHint": "For example 0300 1234567",
+    "sendCode": "Send code",
+    "code": "6-digit code",
+    "codeSent": "We sent a code to {phone}. It expires in 5 minutes.",
+    "verifyCode": "Verify and sign in",
+    "submit": "Sign in",
+    "signingIn": "Signing in…",
+    "invalidCredentials": "That email and password don't match. Check them and try again.",
+    "invalidPhone": "Enter a Pakistani mobile number, like 0300 1234567.",
+    "invalidCode": "That code is wrong or has expired. Request a new one.",
+    "tooManyAttempts": "Too many attempts. Wait a minute, then try again.",
+    "idleSignedOut": "You were signed out after a period of inactivity. Sign in again to continue.",
+    "twoFactorTitle": "Enter your authenticator code",
+    "twoFactorLede": "Open your authenticator app and enter the 6-digit code for Clinic Appointments.",
+    "twoFactorSubmit": "Verify",
+    "genericError": "Sign-in didn't work. Try again in a moment."
+  },
+  "staff": {
+    "chooseClinic": "Choose a clinic",
+    "noClinics": "Your account isn't a staff member of any clinic yet. Ask your clinic admin to invite you.",
+    "nav": {
+      "today": "Today",
+      "calendar": "Calendar",
+      "queue": "Queue",
+      "patients": "Patients",
+      "settings": "Settings"
+    },
+    "role": {
+      "CLINIC_ADMIN": "Clinic admin",
+      "RECEPTIONIST": "Reception",
+      "DOCTOR": "Doctor"
+    },
+    "todayTitle": "Today at {clinic}",
+    "todayEmpty": "The calendar and queue arrive in the next build phases. Your account and role are working.",
+    "signedInAs": "Signed in as {name}",
+    "allBranches": "All branches",
+    "comingSoon": "This screen is built in a later phase."
+  },
+  "portal": {
+    "title": "My appointments",
+    "empty": "You have no appointments yet. Open a clinic's page to book one."
+  },
+  "super": {
+    "title": "Platform admin",
+    "clinics": "Clinics",
+    "members": "{count, plural, one {# staff member} other {# staff members}}"
+  },
+  "clinic": {
+    "branches": "Branches",
+    "doctors": "Doctors",
+    "bookingSoon": "Online booking opens in the next build phase.",
+    "fee": "Fee {amount}"
+  },
+  "errors": {
+    "notFoundTitle": "Page not found",
+    "notFoundBody": "The link may be wrong, or you may not have access to this page."
+  }
+}

@@ -1,0 +1,697 @@
+// Clinic appointment platform: schema v1 (Phase 1).
+//
+// Conventions
+// - Every tenant-owned model has `clinicId` and is listed in src/server/db/tenant-models.ts.
+//   A unit test fails if a model with clinicId is missing from that list.
+// - All instants are timestamptz, stored in UTC. Wall-clock times (availability rules) are
+//   minutes-from-local-midnight in the branch timezone.
+// - Money is stored as integer minor units (paisa for PKR).
+// - Columns ending in `Enc` hold AES-256-GCM ciphertext (src/server/crypto/fields.ts).
+// - Constraints Prisma can't express (exclusion constraints) live in hand-written migration SQL.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================================ platform
+
+enum ClinicStatus {
+  ACTIVE
+  SUSPENDED
+  ONBOARDING
+}
+
+model Plan {
+  id        String   @id @default(cuid(2))
+  name      String   @unique
+  limits    Json     @default("{}")
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  clinics Clinic[]
+}
+
+model Clinic {
+  id            String       @id @default(cuid(2))
+  slug          String       @unique
+  name          String
+  nameUr        String?
+  logoUrl       String?
+  brandColor    String       @default("#0f766e")
+  defaultLocale String       @default("en")
+  currency      String       @default("PKR")
+  status        ClinicStatus @default(ACTIVE)
+  // Typed by ClinicSettingsSchema (src/lib/clinic-settings.ts): booking policy, reminders, quiet hours.
+  settings      Json         @default("{}")
+  planId        String?
+  createdAt     DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime     @updatedAt @db.Timestamptz(3)
+
+  plan                 Plan?                      @relation(fields: [planId], references: [id])
+  branches             Branch[]
+  memberships          Membership[]
+  invites              StaffInvite[]
+  providers            Provider[]
+  services             Service[]
+  resources            Resource[]
+  patients             Patient[]
+  appointments         Appointment[]
+  availabilityRules    AvailabilityRule[]
+  availabilityOverride AvailabilityOverride[]
+  holidays             Holiday[]
+  reservations         Reservation[]
+  auditLogs            AuditLog[]
+  featureFlags         FeatureFlag[]
+  providerBranches     ProviderBranch[]
+  providerServices     ProviderService[]
+  statusHistory        AppointmentStatusHistory[]
+  resourceReservations ResourceReservation[]
+}
+
+model FeatureFlag {
+  id        String   @id @default(cuid(2))
+  key       String
+  // null = platform-wide default
+  clinicId  String?
+  enabled   Boolean  @default(false)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  clinic Clinic? @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  @@unique([key, clinicId])
+}
+
+// ============================================================================ staff & roles
+
+enum StaffRole {
+  CLINIC_ADMIN
+  RECEPTIONIST
+  DOCTOR
+}
+
+enum MembershipStatus {
+  ACTIVE
+  DISABLED
+}
+
+model Membership {
+  id        String           @id @default(cuid(2))
+  clinicId  String
+  userId    String
+  role      StaffRole
+  // Empty array = access to every branch of the clinic.
+  branchIds String[]         @default([])
+  status    MembershipStatus @default(ACTIVE)
+  createdAt DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime         @updatedAt @db.Timestamptz(3)
+
+  clinic   Clinic    @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider Provider?
+
+  @@unique([userId, clinicId])
+  @@index([clinicId, role])
+}
+
+model StaffInvite {
+  id         String    @id @default(cuid(2))
+  clinicId   String
+  email      String
+  role       StaffRole
+  branchIds  String[]  @default([])
+  tokenHash  String    @unique
+  expiresAt  DateTime  @db.Timestamptz(3)
+  acceptedAt DateTime? @db.Timestamptz(3)
+  invitedBy  String
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime  @updatedAt @db.Timestamptz(3)
+
+  clinic Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  @@index([clinicId, email])
+}
+
+// ============================================================================ clinic structure
+
+model Branch {
+  id        String   @id @default(cuid(2))
+  clinicId  String
+  name      String
+  nameUr    String?
+  // IANA zone. Every wall-clock time for this branch is interpreted in it.
+  timezone  String   @default("Asia/Karachi")
+  address   String?
+  city      String?
+  lat       Float?
+  lng       Float?
+  phone     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  clinic            Clinic                 @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  providers         ProviderBranch[]
+  resources         Resource[]
+  availabilityRules AvailabilityRule[]
+  overrides         AvailabilityOverride[]
+  holidays          Holiday[]
+  appointments      Appointment[]
+
+  @@unique([id, clinicId])
+  @@index([clinicId])
+}
+
+model Specialty {
+  id        String   @id @default(cuid(2))
+  slug      String   @unique
+  name      String
+  nameUr    String?
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  providers Provider[]
+}
+
+enum Gender {
+  FEMALE
+  MALE
+  OTHER
+  UNDISCLOSED
+}
+
+enum BookingMode {
+  FIXED_TIME
+  TOKEN
+}
+
+enum ProviderStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model Provider {
+  id                String         @id @default(cuid(2))
+  clinicId          String
+  // Linked staff login, if the doctor uses the app.
+  membershipId      String?        @unique
+  displayName       String
+  displayNameUr     String?
+  title             String?
+  gender            Gender         @default(UNDISCLOSED)
+  languages         String[]       @default([])
+  bio               String?
+  qualifications    String?
+  photoUrl          String?
+  // Minor units (paisa).
+  defaultFee        Int            @default(0)
+  // Extra bookings allowed on top of a full slot (0 = none).
+  overbookAllowance Int            @default(0)
+  bookingMode       BookingMode    @default(FIXED_TIME)
+  // Average consult length, used for token-mode ETAs.
+  avgConsultMin     Int            @default(15)
+  status            ProviderStatus @default(ACTIVE)
+  createdAt         DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime       @updatedAt @db.Timestamptz(3)
+
+  clinic            Clinic                 @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  membership        Membership?            @relation(fields: [membershipId], references: [id], onDelete: SetNull)
+  specialties       Specialty[]
+  branches          ProviderBranch[]
+  services          ProviderService[]
+  availabilityRules AvailabilityRule[]
+  overrides         AvailabilityOverride[]
+  appointments      Appointment[]
+  reservations      Reservation[]
+
+  @@unique([id, clinicId])
+  @@index([clinicId, status])
+}
+
+model ProviderBranch {
+  clinicId   String
+  providerId String
+  branchId   String
+
+  clinic   Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  provider Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  branch   Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@id([providerId, branchId])
+  @@index([clinicId, branchId])
+}
+
+enum PaymentMode {
+  FREE
+  AT_CLINIC
+  DEPOSIT
+  PREPAY
+}
+
+enum ResourceType {
+  ROOM
+  EQUIPMENT
+}
+
+model Service {
+  id                    String         @id @default(cuid(2))
+  clinicId              String
+  name                  String
+  nameUr                String?
+  description           String?
+  durationMin           Int
+  bufferBeforeMin       Int            @default(0)
+  bufferAfterMin        Int            @default(0)
+  // Minor units (paisa).
+  price                 Int            @default(0)
+  paymentMode           PaymentMode    @default(AT_CLINIC)
+  depositAmount         Int?
+  isVideo               Boolean        @default(false)
+  // >1 = group session (e.g. a class); bookings share one time block.
+  capacity              Int            @default(1)
+  requiredResourceTypes ResourceType[] @default([])
+  isActive              Boolean        @default(true)
+  createdAt             DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime       @updatedAt @db.Timestamptz(3)
+
+  clinic       Clinic            @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  providers    ProviderService[]
+  appointments Appointment[]
+
+  @@unique([id, clinicId])
+  @@index([clinicId, isActive])
+}
+
+model ProviderService {
+  clinicId         String
+  providerId       String
+  serviceId        String
+  priceOverride    Int?
+  durationOverride Int?
+
+  clinic   Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  provider Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  service  Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@id([providerId, serviceId])
+  @@index([clinicId, serviceId])
+}
+
+model Resource {
+  id        String       @id @default(cuid(2))
+  clinicId  String
+  branchId  String
+  type      ResourceType
+  name      String
+  isActive  Boolean      @default(true)
+  createdAt DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime     @updatedAt @db.Timestamptz(3)
+
+  clinic       Clinic                @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  branch       Branch                @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  reservations ResourceReservation[]
+
+  @@index([clinicId, branchId, type])
+}
+
+// ============================================================================ availability
+
+model AvailabilityRule {
+  id            String    @id @default(cuid(2))
+  clinicId      String
+  providerId    String
+  branchId      String
+  // ISO weekday: 1 = Monday … 7 = Sunday
+  weekday       Int
+  // Minutes from local midnight in the branch timezone; end is exclusive.
+  startMinute   Int
+  endMinute     Int
+  // Local dates (no time component).
+  effectiveFrom DateTime  @db.Date
+  effectiveTo   DateTime? @db.Date
+  createdAt     DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime  @updatedAt @db.Timestamptz(3)
+
+  clinic   Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  provider Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  branch   Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([clinicId, providerId, branchId])
+}
+
+enum OverrideKind {
+  // Extra hours on top of the weekly rules
+  ADD
+  // Replace that day's weekly hours with these
+  REPLACE
+  // Unavailable (leave); whole day when start/end are null
+  BLOCK
+}
+
+enum ApprovalStatus {
+  APPROVED
+  PENDING
+  REJECTED
+}
+
+model AvailabilityOverride {
+  id             String         @id @default(cuid(2))
+  clinicId       String
+  providerId     String
+  // null = applies at every branch the provider works at
+  branchId       String?
+  date           DateTime       @db.Date
+  kind           OverrideKind
+  startMinute    Int?
+  endMinute      Int?
+  reason         String?
+  approvalStatus ApprovalStatus @default(APPROVED)
+  createdAt      DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime       @updatedAt @db.Timestamptz(3)
+
+  clinic   Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  provider Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  branch   Branch?  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([clinicId, providerId, date])
+}
+
+model Holiday {
+  id        String   @id @default(cuid(2))
+  // null = national public holiday (applies to every clinic)
+  clinicId  String?
+  // null = whole clinic
+  branchId  String?
+  date      DateTime @db.Date
+  name      String
+  nameUr    String?
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  clinic Clinic? @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  branch Branch? @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([clinicId, date])
+  @@index([date])
+}
+
+// ============================================================================ patients
+
+model Patient {
+  id                String    @id @default(cuid(2))
+  clinicId          String
+  // Login account, if any. One user can be a patient at many clinics.
+  userId            String?
+  // Dependents (children, elderly parents) point at the account holder's patient record.
+  guardianPatientId String?
+  // Medical record number, unique per clinic.
+  mrNumber          String
+  name              String
+  phone             String?
+  email             String?
+  dateOfBirth       DateTime? @db.Date
+  gender            Gender    @default(UNDISCLOSED)
+  locale            String    @default("en")
+  // Typed by NotificationPrefsSchema: channels per event, quiet hours.
+  notificationPrefs Json      @default("{}")
+  createdAt         DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime  @updatedAt @db.Timestamptz(3)
+
+  clinic       Clinic        @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  user         User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  guardian     Patient?      @relation("Dependents", fields: [guardianPatientId], references: [id], onDelete: SetNull)
+  dependents   Patient[]     @relation("Dependents")
+  appointments Appointment[]
+
+  @@unique([id, clinicId])
+  @@unique([clinicId, mrNumber])
+  @@index([clinicId, phone])
+  @@index([clinicId, name])
+  @@index([userId])
+}
+
+// ============================================================================ appointments
+
+enum AppointmentStatus {
+  // Created from a hold, awaiting patient confirmation (or auto-confirmed by policy)
+  BOOKED
+  CONFIRMED
+  CHECKED_IN
+  IN_CONSULTATION
+  COMPLETED
+  NO_SHOW
+  CANCELLED
+}
+
+enum AppointmentSource {
+  WEB
+  DESK
+  WALK_IN
+  API
+  WIDGET
+}
+
+model Appointment {
+  id              String            @id @default(cuid(2))
+  clinicId        String
+  branchId        String
+  providerId      String
+  serviceId       String
+  patientId       String
+  bookedByUserId  String?
+  // What the patient sees. Buffers are applied on the Reservation, not here.
+  startAt         DateTime          @db.Timestamptz(3)
+  endAt           DateTime          @db.Timestamptz(3)
+  status          AppointmentStatus @default(BOOKED)
+  source          AppointmentSource @default(WEB)
+  isVideo         Boolean           @default(false)
+  // Token-mode clinics: queue number for the provider's day.
+  tokenNumber     Int?
+  // Self-service reschedule/cancel link; only the SHA-256 of the token is stored.
+  manageTokenHash String?           @unique
+  notesEnc        String?
+  // Minor units, snapshotted at booking time.
+  price           Int               @default(0)
+  currency        String            @default("PKR")
+  cancelledAt     DateTime?         @db.Timestamptz(3)
+  cancelReason    String?
+  createdAt       DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime          @updatedAt @db.Timestamptz(3)
+
+  clinic        Clinic                     @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  branch        Branch                     @relation(fields: [branchId, clinicId], references: [id, clinicId])
+  provider      Provider                   @relation(fields: [providerId, clinicId], references: [id, clinicId])
+  service       Service                    @relation(fields: [serviceId, clinicId], references: [id, clinicId])
+  patient       Patient                    @relation(fields: [patientId, clinicId], references: [id, clinicId])
+  statusHistory AppointmentStatusHistory[]
+  reservation   Reservation?
+
+  @@index([clinicId, providerId, startAt])
+  @@index([clinicId, branchId, startAt])
+  @@index([clinicId, patientId, startAt])
+  @@index([clinicId, status, startAt])
+}
+
+model AppointmentStatusHistory {
+  id            String             @id @default(cuid(2))
+  clinicId      String
+  appointmentId String
+  fromStatus    AppointmentStatus?
+  toStatus      AppointmentStatus
+  byUserId      String?
+  reason        String?
+  at            DateTime           @default(now()) @db.Timestamptz(3)
+
+  clinic      Clinic      @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@index([clinicId, appointmentId, at])
+}
+
+enum ReservationKind {
+  // Temporary checkout hold; expires at expiresAt
+  HOLD
+  // Backs an active appointment
+  APPOINTMENT
+  // Staff-blocked time
+  BLOCK
+}
+
+// Everything that occupies a provider's time. A Postgres exclusion constraint
+// (migration SQL) makes overlapping non-overbook rows for one provider impossible,
+// which is the hard guarantee against double booking.
+model Reservation {
+  id            String          @id @default(cuid(2))
+  clinicId      String
+  providerId    String
+  kind          ReservationKind
+  // Includes service buffers: [start - bufferBefore, end + bufferAfter)
+  occupiedStart DateTime        @db.Timestamptz(3)
+  occupiedEnd   DateTime        @db.Timestamptz(3)
+  expiresAt     DateTime?       @db.Timestamptz(3)
+  appointmentId String?         @unique
+  isOverbook    Boolean         @default(false)
+  // Opaque owner of a HOLD (checkout session), so only that session can convert it.
+  holdOwner     String?
+  createdAt     DateTime        @default(now()) @db.Timestamptz(3)
+
+  clinic      Clinic                @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  provider    Provider              @relation(fields: [providerId, clinicId], references: [id, clinicId], onDelete: Cascade)
+  appointment Appointment?          @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  resources   ResourceReservation[]
+
+  @@index([clinicId, providerId, occupiedStart])
+  @@index([kind, expiresAt])
+}
+
+model ResourceReservation {
+  id            String   @id @default(cuid(2))
+  clinicId      String
+  resourceId    String
+  reservationId String
+  occupiedStart DateTime @db.Timestamptz(3)
+  occupiedEnd   DateTime @db.Timestamptz(3)
+
+  clinic      Clinic      @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  resource    Resource    @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  reservation Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+
+  @@index([clinicId, resourceId, occupiedStart])
+}
+
+// ============================================================================ audit & dev
+
+model AuditLog {
+  id          String   @id @default(cuid(2))
+  clinicId    String?
+  actorUserId String?
+  // e.g. "patient.view", "appointment.update"
+  action      String
+  entity      String
+  entityId    String?
+  patientId   String?
+  ip          String?
+  userAgent   String?
+  meta        Json     @default("{}")
+  at          DateTime @default(now()) @db.Timestamptz(3)
+
+  // Restrict: audit history must outlive any attempt to hard-delete a clinic.
+  clinic Clinic? @relation(fields: [clinicId], references: [id], onDelete: Restrict)
+
+  @@index([clinicId, at])
+  @@index([clinicId, patientId, at])
+  @@index([actorUserId, at])
+}
+
+// Messages "sent" by mock providers (console SMS/WhatsApp, etc.). Viewable at /dev/outbox
+// in development only. Never used when a real provider is configured.
+model DevOutboxMessage {
+  id        String   @id @default(cuid(2))
+  channel   String
+  to        String
+  subject   String?
+  body      String
+  meta      Json     @default("{}")
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([createdAt])
+}
+
+// ============================================================================ auth (Better Auth)
+// Core tables follow Better Auth's schema; extra fields are declared in src/server/auth/auth.ts.
+
+model User {
+  id                  String   @id
+  name                String
+  email               String   @unique
+  emailVerified       Boolean  @default(false)
+  image               String?
+  // phone-number plugin
+  phoneNumber         String?  @unique
+  phoneNumberVerified Boolean?
+  // two-factor plugin
+  twoFactorEnabled    Boolean? @default(false)
+  // app fields
+  isSuperAdmin        Boolean  @default(false)
+  locale              String   @default("en")
+  createdAt           DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime @updatedAt @db.Timestamptz(3)
+
+  sessions    Session[]
+  accounts    Account[]
+  twoFactors  TwoFactor[]
+  memberships Membership[]
+  patients    Patient[]
+
+  @@map("user")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime @db.Timestamptz(3)
+  token     String   @unique
+  ipAddress String?
+  userAgent String?
+  userId    String
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime? @db.Timestamptz(3)
+  refreshTokenExpiresAt DateTime? @db.Timestamptz(3)
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime  @updatedAt @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime @db.Timestamptz(3)
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime @updatedAt @db.Timestamptz(3)
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+model TwoFactor {
+  id                      String    @id
+  secret                  String
+  backupCodes             String
+  userId                  String
+  verified                Boolean?  @default(true)
+  failedVerificationCount Int?      @default(0)
+  lockedUntil             DateTime? @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([secret])
+  @@index([userId])
+  @@map("twoFactor")
+}
